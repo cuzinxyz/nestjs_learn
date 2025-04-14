@@ -9,7 +9,9 @@ import { IsUniqueConstraint } from 'src/helpers/validator';
   imports: [TypeOrmModule.forFeature([User])],
   controllers: [UserController],
   providers: [UserService, IsUniqueConstraint],
+  exports: [UserService], // Export UserService so it can be used in other modules
 })
 export class UserModule {}
+
 
 
