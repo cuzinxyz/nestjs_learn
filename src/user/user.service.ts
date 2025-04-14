@@ -1,10 +1,10 @@
 import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { Repository, Not } from 'typeorm';
 import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
 import { User } from './entities/user.entity';
-import { Not } from 'typeorm';
+import * as bcrypt from 'bcrypt';
 
 @Injectable()
 export class UserService {
@@ -13,13 +13,32 @@ export class UserService {
     private readonly userRepository: Repository<User>,
   ) {}
 
+  private async hashPassword(password: string): Promise<string> {
+    const salt = await bcrypt.genSalt(10);
+    return bcrypt.hash(password, salt);
+  }
+
   async create(createUserDto: CreateUserDto): Promise<User> {
-    const user = this.userRepository.create(createUserDto);
+    const { password, ...userData } = createUserDto;
+    
+    // Hash the password
+    const hashedPassword = await this.hashPassword(password);
+
+    // Create and save the user with hashed password
+    const user = this.userRepository.create({
+      ...userData,
+      password: hashedPassword
+    });
+
+    // The password will be automatically excluded thanks to @Exclude() decorator
     return await this.userRepository.save(user);
   }
 
   async findAll(): Promise<User[]> {
-    return await this.userRepository.find();
+    const users = await this.userRepository.find();
+    // Remove passwords from response
+    users.forEach(user => delete user.password);
+    return users;
   }
 
   async findOne(id: number): Promise<User> {
@@ -27,22 +46,20 @@ export class UserService {
     if (!user) {
       throw new NotFoundException(`User with ID ${id} not found`);
     }
+    // Remove password from response
+    delete user.password;
     return user;
   }
 
   async update(id: number, updateUserDto: UpdateUserDto): Promise<User> {
     // First check if user exists
-    const user = await this.findOne(id);
+    const user = await this.userRepository.findOne({ where: { id } });
+    if (!user) {
+      throw new NotFoundException(`User with ID ${id} not found`);
+    }
     
     // If email is being updated, validate uniqueness excluding current user
     if (updateUserDto.email) {
-      const isUniqueOptions = {
-        tableName: 'users',
-        column: 'email',
-        exceptId: id
-      };
-      
-      // Apply the validation
       const emailExists = await this.userRepository.findOne({
         where: {
           email: updateUserDto.email,
@@ -55,8 +72,14 @@ export class UserService {
       }
     }
 
+    // If password is being updated, hash it
+    if (updateUserDto.password) {
+      updateUserDto.password = await this.hashPassword(updateUserDto.password);
+    }
+
     // Update and save the user
     Object.assign(user, updateUserDto);
+    // The password will be automatically excluded thanks to @Exclude() decorator
     return await this.userRepository.save(user);
   }
 
@@ -65,5 +88,7 @@ export class UserService {
     await this.userRepository.remove(user);
   }
 }
+
+
 
 
